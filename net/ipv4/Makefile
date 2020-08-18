@@ -15,6 +15,7 @@ obj-y     := route.o inetpeer.o protocol.o \
 
 obj-$(CONFIG_NET_IP_TUNNEL) += ip_tunnel.o
 obj-$(CONFIG_SYSCTL) += sysctl_net_ipv4.o
+obj-$(CONFIG_SYSFS) += sysfs_net_ipv4.o
 obj-$(CONFIG_PROC_FS) += proc.o
 obj-$(CONFIG_IP_MULTIPLE_TABLES) += fib_rules.o
 obj-$(CONFIG_IP_MROUTE) += ipmr.o
@@ -60,3 +61,9 @@ obj-$(CONFIG_GENEVE) += geneve.o
 
 obj-$(CONFIG_XFRM) += xfrm4_policy.o xfrm4_state.o xfrm4_input.o \
 		      xfrm4_output.o xfrm4_protocol.o
+#DTS2016060300901  wangqingluo/wwx343280 20160603 begin
+obj-$(CONFIG_HW_WIFIPRO) += wifipro_tcp_monitor.o
+#DTS2016060300901  wangqingluo/wwx343280 20160603 end
+#DTS2016062810925 wangqingluo/wwx343280 20160628 begin
+obj-$(CONFIG_HW_WIFI) += wifi_tcp_statistics.o
+#DTS2016062810925 wangqingluo/wwx343280 20160628 end

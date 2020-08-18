@@ -18,7 +18,28 @@ config MMC_DEBUG
 	help
 	  This is an option for use by developers; most people should
 	  say N here.  This enables MMC core and driver debugging.
+#DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin  
+config HUAWEI_SDCARD_DSM
+	bool "Listen sdcard kernel err"
+	depends on MMC != n
+	default y
+	help
+	  use huawei sdcard log radar
 
+config HUAWEI_EMMC_DSM
+       bool "Listen eMMC kernel err"
+       depends on HUAWEI_DSM != n
+       default n
+       help
+         use huawei eMMC log radar
+
+config HUAWEI_EMMC_DSM_DEBUG
+       bool "Listen eMMC radar err on debug stage"
+       depends on HUAWEI_DSM != n
+       default n
+       help
+         use device radar only to record emmc vdet log
+#DTS2016120701717 guoyuanyuan/gwx422270 20161205 end 
 if MMC
 
 source "drivers/mmc/core/Kconfig"

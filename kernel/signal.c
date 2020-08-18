@@ -9,6 +9,7 @@
  *		Changes to use preallocated sigqueue structures
  *		to allow signals to be sent reliably.
  */
+#define DEBUG
 
 #include <linux/slab.h>
 #include <linux/export.h>
@@ -44,6 +45,10 @@
 #include <asm/siginfo.h>
 #include <asm/cacheflush.h>
 #include "audit.h"	/* audit_signal_info() */
+
+#ifdef CONFIG_HUAWEI_KSTATE
+#include <linux/hw_kcollect.h>
+#endif
 
 /*
  * SLAB caches for signal bits.
@@ -839,8 +844,10 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 	sigset_t flush;
 
 	if (signal->flags & (SIGNAL_GROUP_EXIT | SIGNAL_GROUP_COREDUMP)) {
-		if (signal->flags & SIGNAL_GROUP_COREDUMP)
-			return sig == SIGKILL;
+		if (signal->flags & SIGNAL_GROUP_COREDUMP) {
+			pr_debug("[%d:%s] is in the middle of doing coredump so skip sig %d\n", p->pid, p->comm, sig);
+			return 0;
+		}
 		/*
 		 * The process is in the middle of dying, nothing to do.
 		 */
@@ -1189,6 +1196,11 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 	int ret = -ESRCH;
 
 	if (lock_task_sighand(p, &flags)) {
+#ifdef CONFIG_HUAWEI_KSTATE
+        if (sig == SIGKILL || sig == SIGTERM || sig == SIGABRT) {
+            hwkillinfo(p->tgid, sig);
+        }
+#endif
 		ret = send_signal(sig, info, p, group);
 		unlock_task_sighand(p, &flags);
 	}

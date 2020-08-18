@@ -27,10 +27,22 @@
 #define NETLINK_ECRYPTFS	19
 #define NETLINK_RDMA		20
 #define NETLINK_CRYPTO		21	/* Crypto layer */
-
+#define NETLINK_TOI_USERUI	22	/* TuxOnIce's userui */
+#define NETLINK_TOI_USM		23	/* Userspace storage manager */
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+#define NETLINK_WIFIPRO_EVENT_NL  24
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+#define NETLINK_WIFI_EVENT_NL 25
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 #define NETLINK_INET_DIAG	NETLINK_SOCK_DIAG
 
-#define MAX_LINKS 32		
+#define NETLINK_HW_KSTATE   30  /* kstate send event to user */
+#define MAX_LINKS 32
 
 struct sockaddr_nl {
 	__kernel_sa_family_t	nl_family;	/* AF_NETLINK	*/

@@ -5,6 +5,11 @@
 
 struct netns_mib {
 	DEFINE_SNMP_STAT(struct tcp_mib, tcp_statistics);
+    /* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+	#ifdef CONFIG_HW_WIFIPRO
+	DEFINE_SNMP_STAT(struct wifipro_tcp_mib, wifipro_tcp_statistics);
+	#endif
+    /* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
 	DEFINE_SNMP_STAT(struct ipstats_mib, ip_statistics);
 	DEFINE_SNMP_STAT(struct linux_mib, net_statistics);
 	DEFINE_SNMP_STAT(struct udp_mib, udp_statistics);

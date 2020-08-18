@@ -27,6 +27,11 @@
 #include <linux/module.h>
 #include <linux/math64.h>
 #include <net/tcp.h>
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+#include "wifipro_tcp_monitor.h"
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
 
 #define BICTCP_BETA_SCALE    1024	/* Scale factor beta calculation
 					 * max_cwnd = snd_cwnd * beta
@@ -356,6 +361,14 @@ static void bictcp_state(struct sock *sk, u8 new_state)
 		bictcp_reset(inet_csk_ca(sk));
 		bictcp_hystart_reset(sk);
 	}
+
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+    if(is_wifipro_on && new_state != TCP_CA_Open){
+        wifipro_handle_congestion(sk, new_state);
+    }
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
 }
 
 static void hystart_update(struct sock *sk, u32 delay)

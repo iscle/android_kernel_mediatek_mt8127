@@ -29,6 +29,11 @@
 #include <linux/rcupdate.h>
 #include "input-compat.h"
 
+/*<DTS2016040704823   tanfuhai/twx343282 20160504 begin */
+#ifdef CONFIG_LOG_JANK
+#include <linux/log_jank.h>
+#endif
+/*DTS2016040704823   tanfuhai/twx343282 20160504 end */
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
 MODULE_LICENSE("GPL");
@@ -430,6 +435,29 @@ void input_event(struct input_dev *dev,
 		spin_lock_irqsave(&dev->event_lock, flags);
 		input_handle_event(dev, type, code, value);
 		spin_unlock_irqrestore(&dev->event_lock, flags);
+/*<DTS2016040704823   tanfuhai/twx343282 20160504 begin */
+#ifdef CONFIG_LOG_JANK
+		if(EV_MSC == type)
+		{
+			if((code == MSC_SCAN)&&(!value))
+			{
+				LOG_JANK_D(JLID_COVER_WAKE_LOCK,"%s","JL_COVER_WAKE_LOCK");
+			}
+		}
+		/*
+		else if(EV_REL == type)//modify  by yangfei.wt@20160509
+		{
+			if(code == 0x01)//modify  by yangfei.wt@20160509
+			{
+				if(value)
+					LOG_JANK_D(JLID_PROXIMITY_SENSOR_FAR, "%s", "JL_PROXIMITY_SENSOR_FAR");
+				else
+					LOG_JANK_D(JLID_PROXIMITY_SENSOR_NEAR, "%s", "JL_PROXIMITY_SENSOR_NEAR");
+			}
+		}
+		*/
+#endif
+/*DTS2016040704823   tanfuhai/twx343282 20160504 end */
 	}
 }
 EXPORT_SYMBOL(input_event);
@@ -669,15 +697,18 @@ EXPORT_SYMBOL(input_close_device);
 static void input_dev_release_keys(struct input_dev *dev)
 {
 	int code;
+	bool need_sync = false;
 
 	if (is_event_supported(EV_KEY, dev->evbit, EV_MAX)) {
 		for (code = 0; code <= KEY_MAX; code++) {
 			if (is_event_supported(code, dev->keybit, KEY_MAX) &&
 			    __test_and_clear_bit(code, dev->key)) {
 				input_pass_event(dev, EV_KEY, code, 0);
+				need_sync = true;
 			}
 		}
-		input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
+		if (need_sync)
+			input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
 	}
 }
 

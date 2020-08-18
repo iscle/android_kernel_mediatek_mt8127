@@ -1128,6 +1128,11 @@ static unsigned long maybe_relocated(unsigned long crc,
 	return crc;
 }
 
+/*< DTS2016120105146 mengpan/mwx247577 20161201 begin */
+#ifdef CONFIG_HUAWEI_DSM
+extern int wifi_dsm_report_err(int dsm_err_no, char *err_msg, int err_code);
+#endif
+/* DTS2016120105146 mengpan/mwx247577 20161201 end >*/
 static int check_version(Elf_Shdr *sechdrs,
 			 unsigned int versindex,
 			 const char *symname,
@@ -1167,9 +1172,17 @@ static int check_version(Elf_Shdr *sechdrs,
 bad_version:
 	printk("%s: disagrees about version of symbol %s\n",
 	       mod->name, symname);
+/*< DTS2016120105146 mengpan/mwx247577 20161201 begin */
+#ifdef CONFIG_HUAWEI_DSM
+if(NULL != strstr(mod->name,"wlan"))
+{
+wifi_dsm_report_err(DSM_WIFI_ROOT_NOT_RIGHT_ERR,"root is not right",0);
+}
 	return 0;
 }
 
+#endif
+/* DTS2016120105146 mengpan/mwx247577 20161201 end >*/
 static inline int check_modstruct_version(Elf_Shdr *sechdrs,
 					  unsigned int versindex,
 					  struct module *mod)

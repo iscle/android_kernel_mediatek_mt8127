@@ -315,6 +315,12 @@ struct tcp_sock {
 	 * socket. Used to retransmit SYNACKs etc.
 	 */
 	struct request_sock *fastopen_rsk;
+        /* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	u32 dack_rcv_nxt; /*client send d-ack with this seq*/
+	u32 dack_seq_num; /*the counts of client send d-ack with this seq continuously*/
+#endif
+        /* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 };
 
 enum tsq_flags {

@@ -76,6 +76,14 @@ struct page *ksm_might_need_to_copy(struct page *page,
 int rmap_walk_ksm(struct page *page, struct rmap_walk_control *rwc);
 void ksm_migrate_page(struct page *newpage, struct page *oldpage);
 
+/*add for charing detect*/
+typedef enum {
+	KAL_FALSE = 0,
+	KAL_TRUE  = 1,
+} kal_bool;
+
+kal_bool bat_is_charger_exist(void);
+
 #else  /* !CONFIG_KSM */
 
 static inline int ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
@@ -109,6 +117,12 @@ static inline int page_referenced_ksm(struct page *page,
 			struct mem_cgroup *memcg, unsigned long *vm_flags)
 {
 	return 0;
+}
+
+static inline int try_to_unmap_ksm(struct page *page,
+                         enum ttu_flags flags, struct vm_area_struct *target_vma)
+{
+return 0;
 }
 
 static inline int rmap_walk_ksm(struct page *page,

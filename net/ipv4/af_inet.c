@@ -119,6 +119,19 @@
 #include <linux/mroute.h>
 #endif
 
+#ifdef CONFIG_ANDROID_PARANOID_NETWORK
+#include <linux/android_aid.h>
+
+static inline int current_has_network(void)
+{
+	return in_egroup_p(AID_INET) || capable(CAP_NET_RAW);
+}
+#else
+static inline int current_has_network(void)
+{
+	return 1;
+}
+#endif
 
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
@@ -259,6 +272,9 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 	int try_loading_module = 0;
 	int err;
 
+	if (!current_has_network())
+		return -EACCES;
+
 	sock->state = SS_UNCONNECTED;
 
 	/* Look for the requested type/protocol pair. */
@@ -307,8 +323,7 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
-	if (sock->type == SOCK_RAW && !kern &&
-	    !ns_capable(net->user_ns, CAP_NET_RAW))
+	if (sock->type == SOCK_RAW && !kern && !capable(CAP_NET_RAW))
 		goto out_rcu_unlock;
 
 	sock->ops = answer->ops;
@@ -870,6 +885,7 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	case SIOCSIFPFLAGS:
 	case SIOCGIFPFLAGS:
 	case SIOCSIFFLAGS:
+	case SIOCKILLADDR:
 		err = devinet_ioctl(net, cmd, (void __user *)arg);
 		break;
 	default:
@@ -1528,6 +1544,13 @@ static __net_init int ipv4_mib_init_net(struct net *net)
 	net->mib.tcp_statistics = alloc_percpu(struct tcp_mib);
 	if (!net->mib.tcp_statistics)
 		goto err_tcp_mib;
+/*< <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+    net->mib.wifipro_tcp_statistics = alloc_percpu(struct wifipro_tcp_mib);
+	if (!net->mib.wifipro_tcp_statistics)
+        goto err_wifipro_tcp_mib;
+#endif
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 end >*/
 	net->mib.ip_statistics = alloc_percpu(struct ipstats_mib);
 	if (!net->mib.ip_statistics)
 		goto err_ip_mib;
@@ -1570,6 +1593,12 @@ err_net_mib:
 	free_percpu(net->mib.ip_statistics);
 err_ip_mib:
 	free_percpu(net->mib.tcp_statistics);
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+err_wifipro_tcp_mib:
+    free_percpu(net->mib.wifipro_tcp_statistics);
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
 err_tcp_mib:
 	return -ENOMEM;
 }
@@ -1582,6 +1611,11 @@ static __net_exit void ipv4_mib_exit_net(struct net *net)
 	free_percpu(net->mib.udp_statistics);
 	free_percpu(net->mib.net_statistics);
 	free_percpu(net->mib.ip_statistics);
+	/* < DTS2016061000314 wangqingluo/wwx343280 20160610 begin */
+#ifdef CONFIG_HW_WIFIPRO
+    free_percpu(net->mib.wifipro_tcp_statistics);
+#endif
+    /* DTS2016061000314 wangqingluo/wwx343280 20160610 end > */
 	free_percpu(net->mib.tcp_statistics);
 }
 

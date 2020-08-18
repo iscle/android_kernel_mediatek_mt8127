@@ -31,6 +31,12 @@ fw-shipped-$(CONFIG_ADAPTEC_STARFIRE) += adaptec/starfire_rx.bin \
 					 adaptec/starfire_tx.bin
 fw-shipped-$(CONFIG_ATARI_DSP56K) += dsp56k/bootstrap.bin
 fw-shipped-$(CONFIG_ATM_AMBASSADOR) += atmsar11.fw
+#DTS2017010610923,shangqiang/ywx422251 add new TP drivers,begin @20170106
+fw-shipped-$(CONFIG_GTP_REQUEST_FW_UPDATE) += gt9xx/gt9xx_fw.bin
+#DTS2017010610923,shangqiang/ywx422251 add new TP drivers,end @20170106
+#DTS2017022402110,shangqiang/ywx422251 add new TP drivers,start @20170331
+fw-shipped-$(CONFIG_TOUCHSCREEN_MTK_FT3427) += focal/ft3427_fw.bin
+#DTS2017022402110,shangqiang/ywx422251 add new TP drivers,end @20170331
 fw-shipped-$(CONFIG_BNX2X) += bnx2x/bnx2x-e1-6.2.9.0.fw \
 			      bnx2x/bnx2x-e1h-6.2.9.0.fw \
 			      bnx2x/bnx2x-e2-6.2.9.0.fw

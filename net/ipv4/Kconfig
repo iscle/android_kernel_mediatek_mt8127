@@ -671,3 +671,17 @@ config TCP_MD5SIG
 	  on the Internet.
 
 	  If unsure, say N.
+
+#DTS2016062810925 wangqingluo/wwx343280 20160628 begin
+config HW_WIFIPRO
+	bool "Huawei wifipro tcp monitor support"
+	default n
+
+config HW_WIFIPRO_PROC
+	bool "Huawei wifipro proc support"
+	default n
+
+config HW_WIFI
+	bool "Huawei wifi tcp monitor support"
+	default n
+#DTS2016062810925 wangqingluo/wwx343280 20160628 end

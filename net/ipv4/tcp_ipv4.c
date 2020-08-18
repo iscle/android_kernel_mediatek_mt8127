@@ -85,6 +85,17 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+#include "wifipro_tcp_monitor.h"
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+#include "wifi_tcp_statistics.h"
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
+
 int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 EXPORT_SYMBOL(sysctl_tcp_low_latency);
@@ -431,7 +442,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 		icsk->icsk_backoff--;
 		icsk->icsk_rto = tp->srtt_us ? __tcp_set_rto(tp) :
 					       TCP_TIMEOUT_INIT;
-		icsk->icsk_rto = inet_csk_rto_backoff(icsk, TCP_RTO_MAX);
+		icsk->icsk_rto = inet_csk_rto_backoff(icsk, sysctl_tcp_rto_max);
 
 		skb = tcp_write_queue_head(sk);
 		BUG_ON(!skb);
@@ -442,7 +453,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		if (remaining) {
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-						  remaining, TCP_RTO_MAX);
+						  remaining, sysctl_tcp_rto_max);
 		} else {
 			/* RTO revert clocked out retransmission.
 			 * Will retransmit now */
@@ -690,7 +701,11 @@ static void tcp_v4_send_reset(struct sock *sk, struct sk_buff *skb)
 
 	TCP_INC_STATS_BH(net, TCP_MIB_OUTSEGS);
 	TCP_INC_STATS_BH(net, TCP_MIB_OUTRSTS);
-
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	wifi_IncrRstSegs(sk, 1);
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 #ifdef CONFIG_TCP_MD5SIG
 release_sk1:
 	if (sk1) {
@@ -1574,7 +1589,7 @@ bool tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 		if (!inet_csk_ack_scheduled(sk))
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
 						  (3 * tcp_rto_min(sk)) / 4,
-						  TCP_RTO_MAX);
+						  sysctl_tcp_rto_max);
 	}
 	return true;
 }
@@ -1671,6 +1686,15 @@ process:
 
 	bh_lock_sock_nested(sk);
 	ret = 0;
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	wifi_IncrRecvSegs(sk, 1);
+#endif
+
+#ifdef CONFIG_HW_WIFIPRO
+	wifipro_update_tcp_statistics(WIFIPRO_TCP_MIB_INSEGS, skb, sk);
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 	if (!sock_owned_by_user(sk)) {
 		if (!tcp_prequeue(sk, skb))
 			ret = tcp_v4_do_rcv(sk, skb);
@@ -1722,6 +1746,7 @@ do_time_wait:
 		inet_twsk_put(inet_twsk(sk));
 		goto csum_error;
 	}
+
 	switch (tcp_timewait_state_process(inet_twsk(sk), skb, th)) {
 	case TCP_TW_SYN: {
 		struct sock *sk2 = inet_lookup_listener(dev_net(skb->dev),
@@ -1851,6 +1876,97 @@ void tcp_v4_destroy_sock(struct sock *sk)
 	sock_release_memcg(sk);
 }
 EXPORT_SYMBOL(tcp_v4_destroy_sock);
+
+void tcp_v4_handle_retrans_time_by_uid(struct uid_err uid_e)
+{
+	unsigned int bucket;
+	uid_t skuid = (uid_t)(uid_e.appuid);
+	struct inet_connection_sock *icsk = NULL;
+
+	for (bucket = 0; bucket < tcp_hashinfo.ehash_mask; bucket++) {
+		struct hlist_nulls_node *node;
+		struct sock *sk;
+		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
+
+		spin_lock_bh(lock);
+		sk_nulls_for_each(sk, node, &tcp_hashinfo.ehash[bucket].chain) {
+			if (sysctl_ip_dynaddr && sk->sk_state == TCP_SYN_SENT)
+				continue;
+			if (sock_flag(sk, SOCK_DEAD))
+				continue;
+
+			if (sk->sk_socket) {
+				if (SOCK_INODE(sk->sk_socket)->i_uid.val != skuid)
+					continue;
+
+			} else {
+				continue;
+			}
+
+			sock_hold(sk);
+			spin_unlock_bh(lock);
+
+			local_bh_disable();
+			bh_lock_sock(sk);
+
+			icsk = inet_csk(sk);
+			pr_debug("[mmspb] tcp_v4_handle_retrans_time_by_uid update timer\n");
+
+			sk_reset_timer(sk, &icsk->icsk_retransmit_timer, jiffies + 2);
+			bh_unlock_sock(sk);
+			local_bh_enable();
+			spin_lock_bh(lock);
+			sock_put(sk);
+		}
+		spin_unlock_bh(lock);
+	}
+}
+
+/* tcp_v4_nuke_addr_by_uid - destroy all sockets of spcial uid*/
+void tcp_v4_reset_connections_by_uid(struct uid_err uid_e)
+{
+	unsigned int bucket;
+	uid_t skuid = (uid_t)(uid_e.appuid);
+
+	for (bucket = 0; bucket < tcp_hashinfo.ehash_mask; bucket++) {
+		struct hlist_nulls_node *node;
+		struct sock *sk;
+		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
+
+restart:
+		spin_lock_bh(lock);
+		sk_nulls_for_each(sk, node, &tcp_hashinfo.ehash[bucket].chain) {
+			if (sysctl_ip_dynaddr && sk->sk_state == TCP_SYN_SENT)
+				continue;
+			if (sock_flag(sk, SOCK_DEAD))
+				continue;
+			if (sk->sk_state == TCP_TIME_WAIT)
+				continue;
+			if (sk->sk_socket) {
+				if (SOCK_INODE(sk->sk_socket)->i_uid.val != skuid)
+					continue;
+			} else {
+				continue;
+			}
+
+			sock_hold(sk);
+			spin_unlock_bh(lock);
+
+			local_bh_disable();
+			bh_lock_sock(sk);
+			sk->sk_err = uid_e.errNum;
+			pr_debug("SIOCKILLSOCK set sk err == %d!!\n", sk->sk_err);
+			sk->sk_error_report(sk);
+
+			tcp_done(sk);
+			bh_unlock_sock(sk);
+			local_bh_enable();
+			sock_put(sk);
+			goto restart;
+		}
+		spin_unlock_bh(lock);
+	}
+}
 
 #ifdef CONFIG_PROC_FS
 /* Proc filesystem TCP sock list dumping. */

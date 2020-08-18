@@ -20,6 +20,12 @@ bool irq_pm_check_wakeup(struct irq_desc *desc)
 		irqd_clear(&desc->irq_data, IRQD_WAKEUP_ARMED);
 		desc->istate |= IRQS_SUSPENDED | IRQS_PENDING;
 		desc->depth++;
+		/* DTS2016122810087 guoyuanyuan/gwx422270 20161228 begin*/
+		printk("wakeuped by irq %d\n", desc->irq_data.irq);
+		if(desc->action && desc->action->name){
+		     printk("wakeuped by dev %s\n", desc->action->name);
+		}
+		/* DTS2016122810087 guoyuanyuan/gwx422270 2016128 end*/
 		irq_disable(desc);
 		pm_system_wakeup();
 		return true;

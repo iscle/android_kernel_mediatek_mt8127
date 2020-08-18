@@ -40,6 +40,9 @@
 #include <linux/crc16.h>
 #include <linux/cleancache.h>
 #include <asm/uaccess.h>
+#ifdef CONFIG_PWR_LOSS_MTK_SPOH
+#include <mach/power_loss_test.h>
+#endif
 
 #include <linux/kthread.h>
 #include <linux/freezer.h>
@@ -53,7 +56,34 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ext4.h>
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+#include 	<dsm/dsm_pub.h>
+#include <asm-generic/gpio.h>
+//#include <mt-plat/mt_boot.h>
+#define CLIENT_NAME_FS_EXT4		"dsm_ext4"
+static int rgb_fs_ext4_debug_mask= 1;
+static struct dsm_dev dsm_fs_ext4 = {
+	.name 		= CLIENT_NAME_FS_EXT4,		// dsm client name
+	.fops 		= NULL,						      // options
+	.buff_size 	= DSM_SENSOR_BUF_MAX,			// buffer size
+};
+#define FS_EXT4_ERR(x...) do {\
+    if (rgb_fs_ext4_debug_mask >=0) \
+        printk(KERN_ERR x);\
+    } while (0)
 
+#define FS_EXT4_INFO(x...) do {\
+    if (rgb_fs_ext4_debug_mask >=1) \
+        printk(KERN_ERR x);\
+    } while (0)
+#define FS_EXT4_FLOW(x...) do {\
+    if (rgb_fs_ext4_debug_mask >=2) \
+        printk(KERN_ERR x);\
+    } while (0)
+struct dsm_client *fs_ext4_dclient = NULL;
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 static struct proc_dir_entry *ext4_proc_root;
 static struct kset *ext4_kset;
 static struct ext4_lazy_init *ext4_li_info;
@@ -304,6 +334,8 @@ static void __save_error_info(struct super_block *sb, const char *func,
 	struct ext4_super_block *es = EXT4_SB(sb)->s_es;
 
 	EXT4_SB(sb)->s_mount_state |= EXT4_ERROR_FS;
+	if (bdev_read_only(sb->s_bdev))
+		return;
 	es->s_state |= cpu_to_le16(EXT4_ERROR_FS);
 	es->s_last_error_time = cpu_to_le32(get_seconds());
 	strncpy(es->s_last_error_func, func, sizeof(es->s_last_error_func));
@@ -426,6 +458,15 @@ void __ext4_error(struct super_block *sb, const char *function,
 		printk(KERN_CRIT
 		       "EXT4-fs error (device %s): %s:%d: comm %s: %pV\n",
 		       sb->s_id, function, line, current->comm, &vaf);
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/			   
+#ifdef CONFIG_HUAWEI_DSM
+if(!dsm_client_ocuppy(fs_ext4_dclient))
+	{
+		dsm_client_record(fs_ext4_dclient,"EXT4-fs error (device %s): %s:%d\n",sb->s_id, function, line);
+		dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR);
+	}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 		va_end(args);
 	}
 	save_error_info(sb, function, line);
@@ -446,6 +487,16 @@ void __ext4_error_inode(struct inode *inode, const char *function,
 		va_start(args, fmt);
 		vaf.fmt = fmt;
 		vaf.va = &args;
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+	if(!dsm_client_ocuppy(fs_ext4_dclient))
+	{
+		dsm_client_record(fs_ext4_dclient,"EXT4-fs error (device %s): %s:%d:inode #%lu\n",
+				inode->i_sb->s_id, function, line, inode->i_ino);
+		dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR_INODE);
+	}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 		if (block)
 			printk(KERN_CRIT "EXT4-fs error (device %s): %s:%d: "
 			       "inode #%lu: block %llu: comm %s: %pV\n",
@@ -478,6 +529,16 @@ void __ext4_error_file(struct file *file, const char *function,
 		path = d_path(&(file->f_path), pathname, sizeof(pathname));
 		if (IS_ERR(path))
 			path = "(unknown)";
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+if(!dsm_client_ocuppy(fs_ext4_dclient))
+	{
+	dsm_client_record(fs_ext4_dclient,"EXT4-fs error (device %s): %s:%d:inode #%lu\n",
+			inode->i_sb->s_id, function, line, inode->i_ino);
+		dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR_FILE);
+	}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 		va_start(args, fmt);
 		vaf.fmt = fmt;
 		vaf.va = &args;
@@ -902,7 +963,9 @@ static struct inode *ext4_alloc_inode(struct super_block *sb)
 	atomic_set(&ei->i_ioend_count, 0);
 	atomic_set(&ei->i_unwritten, 0);
 	INIT_WORK(&ei->i_rsv_conversion_work, ext4_end_io_rsv_work);
-
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+	ei->i_crypt_info = NULL;
+#endif
 	return &ei->vfs_inode;
 }
 
@@ -980,6 +1043,10 @@ void ext4_clear_inode(struct inode *inode)
 		jbd2_free_inode(EXT4_I(inode)->jinode);
 		EXT4_I(inode)->jinode = NULL;
 	}
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+	if (EXT4_I(inode)->i_crypt_info)
+		ext4_free_encryption_info(inode, EXT4_I(inode)->i_crypt_info);
+#endif
 }
 
 static struct inode *ext4_nfs_get_inode(struct super_block *sb,
@@ -1137,7 +1204,7 @@ enum {
 	Opt_commit, Opt_min_batch_time, Opt_max_batch_time, Opt_journal_dev,
 	Opt_journal_path, Opt_journal_checksum, Opt_journal_async_commit,
 	Opt_abort, Opt_data_journal, Opt_data_ordered, Opt_data_writeback,
-	Opt_data_err_abort, Opt_data_err_ignore,
+	Opt_data_err_abort, Opt_data_err_ignore, Opt_test_dummy_encryption,
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0, Opt_jqfmt_vfsv1, Opt_quota,
 	Opt_noquota, Opt_barrier, Opt_nobarrier, Opt_err,
@@ -1223,6 +1290,7 @@ static const match_table_t tokens = {
 	{Opt_init_itable, "init_itable"},
 	{Opt_noinit_itable, "noinit_itable"},
 	{Opt_max_dir_size_kb, "max_dir_size_kb=%u"},
+	{Opt_test_dummy_encryption, "test_dummy_encryption"},
 	{Opt_removed, "check=none"},	/* mount option from ext2/3 */
 	{Opt_removed, "nocheck"},	/* mount option from ext2/3 */
 	{Opt_removed, "reservation"},	/* mount option from ext2/3 */
@@ -1421,6 +1489,7 @@ static const struct mount_opts {
 	{Opt_jqfmt_vfsv0, QFMT_VFS_V0, MOPT_QFMT},
 	{Opt_jqfmt_vfsv1, QFMT_VFS_V1, MOPT_QFMT},
 	{Opt_max_dir_size_kb, 0, MOPT_GTE0},
+	{Opt_test_dummy_encryption, 0, MOPT_GTE0},
 	{Opt_err, 0, 0}
 };
 
@@ -1591,6 +1660,15 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		}
 		*journal_ioprio =
 			IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, arg);
+	} else if (token == Opt_test_dummy_encryption) {
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+		sbi->s_mount_flags |= EXT4_MF_TEST_DUMMY_ENCRYPTION;
+		ext4_msg(sb, KERN_WARNING,
+			 "Test dummy encryption mode enabled");
+#else
+		ext4_msg(sb, KERN_WARNING,
+			 "Test dummy encryption mount option ignored");
+#endif
 	} else if (m->flags & MOPT_DATAJ) {
 		if (is_remount) {
 			if (!sbi->s_journal)
@@ -1900,6 +1978,9 @@ static int ext4_setup_super(struct super_block *sb, struct ext4_super_block *es,
 	if (sbi->s_journal)
 		EXT4_SET_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_RECOVER);
 
+#ifdef CONFIG_PWR_LOSS_MTK_SPOH
+	PL_RESET_ON_CASE("EXT4", "Mount");
+#endif
 	ext4_commit_super(sb, 1);
 done:
 	if (test_opt(sb, DEBUG))
@@ -2677,11 +2758,13 @@ static struct attribute *ext4_attrs[] = {
 EXT4_INFO_ATTR(lazy_itable_init);
 EXT4_INFO_ATTR(batched_discard);
 EXT4_INFO_ATTR(meta_bg_resize);
+EXT4_INFO_ATTR(encryption);
 
 static struct attribute *ext4_feat_attrs[] = {
 	ATTR_LIST(lazy_itable_init),
 	ATTR_LIST(batched_discard),
 	ATTR_LIST(meta_bg_resize),
+	ATTR_LIST(encryption),
 	NULL,
 };
 
@@ -3460,6 +3543,15 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 
 	if (!(bh = sb_bread_unmovable(sb, logical_sb_block))) {
 		ext4_msg(sb, KERN_ERR, "unable to read superblock");
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+		if(!dsm_client_ocuppy(fs_ext4_dclient))
+		{
+			dsm_client_record(fs_ext4_dclient,"EXT4-fs(%s):unable to read superblock\n",sb->s_id);
+			dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR_READ_SUPER);
+		}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 		goto out_fail;
 	}
 	/*
@@ -3660,6 +3752,13 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount;
 	}
 
+	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT) &&
+	    es->s_encryption_level) {
+		ext4_msg(sb, KERN_ERR, "Unsupported encryption level %d",
+			 es->s_encryption_level);
+		goto failed_mount;
+	}
+
 	if (sb->s_blocksize != blocksize) {
 		/* Validate the filesystem blocksize */
 		if (!sb_set_blocksize(sb, blocksize)) {
@@ -3675,6 +3774,14 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		if (!bh) {
 			ext4_msg(sb, KERN_ERR,
 			       "Can't read superblock on 2nd try");
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+			{
+				dsm_client_record(fs_ext4_dclient,"EXT4-fs(%s):Can't read superblock on 2nd try\n",sb->s_id);
+				dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR_READ_SUPER_SECOND);
+			}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 			goto failed_mount;
 		}
 		es = (struct ext4_super_block *)(bh->b_data + offset);
@@ -4020,6 +4127,13 @@ no_journal:
 			ext4_msg(sb, KERN_ERR, "Failed to create an mb_cache");
 			goto failed_mount_wq;
 		}
+	}
+
+	if (unlikely(sbi->s_mount_flags & EXT4_MF_TEST_DUMMY_ENCRYPTION) &&
+	    !(sb->s_flags & MS_RDONLY) &&
+	    !EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT)) {
+		EXT4_SET_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_ENCRYPT);
+		ext4_commit_super(sb, 1);
 	}
 
 	/*
@@ -4594,6 +4708,15 @@ static int ext4_commit_super(struct super_block *sb, int sync)
 		if (error) {
 			ext4_msg(sb, KERN_ERR, "I/O error while writing "
 			       "superblock");
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_DSM
+			if(!dsm_client_ocuppy(fs_ext4_dclient))
+			{
+				dsm_client_record(fs_ext4_dclient,"EXT4-fs(%s):I/O error while writing superblock\n",sb->s_id);
+				dsm_client_notify(fs_ext4_dclient, DSM_FS_EXT4_ERROR_WRITE_SUPER);
+			}
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 			clear_buffer_write_io_error(sbh);
 			set_buffer_uptodate(sbh);
 		}
@@ -5007,6 +5130,19 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 
 	ext4_msg(sb, KERN_INFO, "re-mounted. Opts: %s", orig_data);
 	kfree(orig_data);
+/*DTS2016061600972 sijun  swx353748 20160617 begin */
+/*DTS2016062709211 sijun  swx353748 20160627 begin */
+#if 0
+#ifdef CONFIG_HUAWEI_DSM
+if(fs_ext4_dclient)
+		{
+	dsm_unregister_client(fs_ext4_dclient,&dsm_fs_ext4);
+	fs_ext4_dclient=NULL;
+}
+#endif
+#endif
+/*DTS2016062709211 sijun  swx353748 20160627 end */
+/*DTS2016061600972 sijun  swx353748 20160617 end */
 	return 0;
 
 restore_opts:
@@ -5583,7 +5719,13 @@ static int __init ext4_init_fs(void)
 	err = register_filesystem(&ext4_fs_type);
 	if (err)
 		goto out;
-
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 begin >*/	
+#ifdef CONFIG_HUAWEI_DSM
+	fs_ext4_dclient = dsm_register_client(&dsm_fs_ext4);
+	if(!fs_ext4_dclient)
+		FS_EXT4_ERR("%s: register dsm_dclient failed!!, line = %d\n", __func__,__LINE__);
+#endif
+/*DTS2016120612175 guoyuanyuan/gwx422270 20161205 end >*/
 	return 0;
 out:
 	unregister_as_ext2();
@@ -5610,6 +5752,7 @@ out7:
 
 static void __exit ext4_exit_fs(void)
 {
+	ext4_exit_crypto();
 	ext4_destroy_lazyinit_thread();
 	unregister_as_ext2();
 	unregister_as_ext3();

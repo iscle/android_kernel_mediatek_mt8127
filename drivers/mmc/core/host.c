@@ -29,7 +29,18 @@
 
 #include "core.h"
 #include "host.h"
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+#include <linux/mmc/dsm_sdcard.h>
+struct dsm_dev dsm_sdcard = {
+	.name = "dsm_sdcard",
+	.fops = NULL,
+	.buff_size = 1024,
+};
+struct dsm_client *sdcard_dclient = NULL;
+char g_dsm_log_sum[1024] = {0};
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 #define cls_dev_to_mmc_host(d)	container_of(d, struct mmc_host, class_dev)
 
 static void mmc_host_classdev_release(struct device *dev)
@@ -297,6 +308,90 @@ static inline void mmc_host_clk_sysfs_init(struct mmc_host *host)
 
 #endif
 
+void mmc_retune_enable(struct mmc_host *host)
+{
+	host->can_retune = 1;
+	if (host->retune_period)
+		mod_timer(&host->retune_timer,
+			  jiffies + host->retune_period * HZ);
+}
+
+void mmc_retune_disable(struct mmc_host *host)
+{
+	host->can_retune = 0;
+	del_timer_sync(&host->retune_timer);
+	host->retune_now = 0;
+	host->need_retune = 0;
+}
+
+void mmc_retune_timer_stop(struct mmc_host *host)
+{
+	del_timer_sync(&host->retune_timer);
+}
+EXPORT_SYMBOL(mmc_retune_timer_stop);
+
+void mmc_retune_hold(struct mmc_host *host)
+{
+	if (!host->hold_retune)
+		host->retune_now = 1;
+	host->hold_retune += 1;
+}
+
+void mmc_retune_release(struct mmc_host *host)
+{
+	if (host->hold_retune)
+		host->hold_retune -= 1;
+	else
+		WARN_ON(1);
+}
+
+int mmc_retune(struct mmc_host *host)
+{
+	bool return_to_hs400 = false;
+	int err;
+
+	if (host->retune_now)
+		host->retune_now = 0;
+	else
+		return 0;
+
+	if (!host->need_retune || host->doing_retune || !host->card)
+		return 0;
+
+	host->need_retune = 0;
+
+	host->doing_retune = 1;
+
+	if (host->ios.timing == MMC_TIMING_MMC_HS400) {
+		err = mmc_hs400_to_hs200(host->card);
+		if (err)
+			goto out;
+
+		return_to_hs400 = true;
+
+		if (host->ops->prepare_hs400_tuning)
+			host->ops->prepare_hs400_tuning(host, &host->ios);
+	}
+
+	err = mmc_execute_tuning(host->card);
+	if (err)
+		goto out;
+
+	if (return_to_hs400)
+		err = mmc_hs200_to_hs400(host->card);
+out:
+	host->doing_retune = 0;
+
+	return err;
+}
+
+static void mmc_retune_timer(unsigned long data)
+{
+	struct mmc_host *host = (struct mmc_host *)data;
+
+	mmc_retune_needed(host);
+}
+
 /**
  *	mmc_of_parse() - parse host's device-tree node
  *	@host: host whose node should be parsed.
@@ -428,6 +523,8 @@ int mmc_of_parse(struct mmc_host *host)
 		host->caps |= MMC_CAP_UHS_DDR50;
 	if (of_find_property(np, "cap-power-off-card", &len))
 		host->caps |= MMC_CAP_POWER_OFF_CARD;
+	if (of_find_property(np, "cap-mmc-hw-reset", &len))
+		host->caps |= MMC_CAP_HW_RESET;
 	if (of_find_property(np, "cap-sdio-irq", &len))
 		host->caps |= MMC_CAP_SDIO_IRQ;
 	if (of_find_property(np, "full-pwr-cycle", &len))
@@ -477,6 +574,9 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 {
 	int err;
 	struct mmc_host *host;
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	int i;
+#endif
 
 	host = kzalloc(sizeof(struct mmc_host) + extra, GFP_KERNEL);
 	if (!host)
@@ -508,10 +608,18 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	spin_lock_init(&host->lock);
 	init_waitqueue_head(&host->wq);
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/	
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	if (!sdcard_dclient) {
+		sdcard_dclient = dsm_register_client(&dsm_sdcard);
+	}
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
 #ifdef CONFIG_PM
 	host->pm_notify.notifier_call = mmc_pm_notify;
 #endif
+	setup_timer(&host->retune_timer, mmc_retune_timer, (unsigned long)host);
 
 	/*
 	 * By default, hosts do not support SGIO or large requests.
@@ -524,13 +632,38 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	host->max_blk_size = 512;
 	host->max_blk_count = PAGE_CACHE_SIZE / 512;
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	host->align_size = 4;
+
+	for (i = 0; i < EMMC_MAX_QUEUE_DEPTH; i++)
+		host->areq_que[i] = NULL;
+	atomic_set(&host->areq_cnt, 0);
+	host->areq_cur = NULL;
+	host->done_mrq = NULL;
+	host->state = 0;
+
+	INIT_LIST_HEAD(&host->cmd_que);
+	INIT_LIST_HEAD(&host->dat_que);
+	spin_lock_init(&host->cmd_que_lock);
+	spin_lock_init(&host->dat_que_lock);
+	spin_lock_init(&host->que_lock);
+	spin_lock_init(&host->thread_lock);
+	spin_lock_init(&host->cmd_dump_lock);
+	spin_lock_init(&host->host_claim_lock);
+
+	init_waitqueue_head(&host->cmp_que);
+#endif
 	return host;
 
 free:
 	kfree(host);
 	return NULL;
 }
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+EXPORT_SYMBOL(sdcard_dclient);
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 EXPORT_SYMBOL(mmc_alloc_host);
 
 /**
@@ -560,7 +693,8 @@ int mmc_add_host(struct mmc_host *host)
 	mmc_host_clk_sysfs_init(host);
 
 	mmc_start_host(host);
-	register_pm_notifier(&host->pm_notify);
+	if (!(host->pm_flags & MMC_PM_IGNORE_PM_NOTIFY))
+		register_pm_notifier(&host->pm_notify);
 
 	return 0;
 }
@@ -577,7 +711,9 @@ EXPORT_SYMBOL(mmc_add_host);
  */
 void mmc_remove_host(struct mmc_host *host)
 {
-	unregister_pm_notifier(&host->pm_notify);
+	if (!(host->pm_flags & MMC_PM_IGNORE_PM_NOTIFY))
+		unregister_pm_notifier(&host->pm_notify);
+
 	mmc_stop_host(host);
 
 #ifdef CONFIG_DEBUG_FS

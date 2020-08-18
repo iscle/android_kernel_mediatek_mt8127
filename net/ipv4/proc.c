@@ -45,7 +45,20 @@
 #include <linux/export.h>
 #include <net/sock.h>
 #include <net/raw.h>
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifndef CONFIG_HW_WIFIPRO
+#undef CONFIG_HW_WIFIPRO_PROC
+#endif
 
+#ifdef CONFIG_HW_WIFIPRO_PROC
+#include "wifipro_tcp_monitor.h"
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+#include "wifi_tcp_statistics.h"
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 /*
  *	Report socket allocation statistics [mea@utu.fi]
  */
@@ -499,7 +512,20 @@ static __net_init int ip_proc_init_net(struct net *net)
 		goto out_netstat;
 	if (!proc_create("snmp", S_IRUGO, net->proc_net, &snmp_seq_fops))
 		goto out_snmp;
-
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO_PROC
+    if (wifipro_init_proc(net)){
+        WIFIPRO_WARNING("wifipro_init_proc fail!");
+    }
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+    if (wifi_tcp_init_proc(net)) {
+        WIFIPRO_WARNING("wifi_tcp_init_proc fail!");
+    }
+#endif
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 end */
 	return 0;
 
 out_snmp:

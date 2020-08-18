@@ -67,6 +67,13 @@ source "fs/quota/Kconfig"
 
 source "fs/autofs4/Kconfig"
 source "fs/fuse/Kconfig"
+# < DTS2016050510785 daiguojin/dwx363826 20160506 begin
+source "fs/exfat/Kconfig"
+# DTS2016050510785 daiguojin/dwx363826 20160506 end >
+#/* < DTS2016080304382 yangfei/ywx353749 20160803 begin */
+source "fs/ntfs/Kconfig"
+#/* < DTS2016080304382 yangfei/ywx353749 20160803 end */
+
 source "fs/overlayfs/Kconfig"
 
 menu "Caches"
@@ -269,5 +276,7 @@ endif # NETWORK_FILESYSTEMS
 
 source "fs/nls/Kconfig"
 source "fs/dlm/Kconfig"
+source "fs/rawfs/Kconfig"
+source "fs/yaffs2/Kconfig"
 
 endmenu

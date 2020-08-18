@@ -2,6 +2,13 @@
 # Makefile for the linux kernel.
 #
 
+subdir-ccflags-y += -Werror -Wno-error=maybe-uninitialized
+
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mtprof/
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/hibcore
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
+
 obj-y     = fork.o exec_domain.o panic.o \
 	    cpu.o exit.o softirq.o resource.o \
 	    sysctl.o sysctl_binary.o capability.o ptrace.o user.o \
@@ -52,6 +59,9 @@ obj-$(CONFIG_BACKTRACE_SELF_TEST) += backtracetest.o
 obj-$(CONFIG_COMPAT) += compat.o
 obj-$(CONFIG_CGROUPS) += cgroup.o
 obj-$(CONFIG_CGROUP_FREEZER) += cgroup_freezer.o
+# /* < DTS2015052904471 rachit 20150529 begin */
+obj-$(CONFIG_CGROUP_PIDS) += cgroup_pids.o
+# /* DTS2015052904471 rachit 20150529 end > */
 obj-$(CONFIG_CPUSETS) += cpuset.o
 obj-$(CONFIG_UTS_NS) += utsname.o
 obj-$(CONFIG_USER_NS) += user_namespace.o

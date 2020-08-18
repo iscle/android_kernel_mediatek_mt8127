@@ -157,9 +157,11 @@ static struct sync_fence *sync_fence_alloc(int size, const char *name)
 	fence = kzalloc(size, GFP_KERNEL);
 	if (fence == NULL)
 		return NULL;
-
-	fence->file = anon_inode_getfile("sync_fence", &sync_fence_fops,
+    /*DTS2017031303521 ,tianfangzhou twx429349 ,20170328,begin*/
+    fence->file = anon_inode_getfile(name?name:"NULL", &sync_fence_fops,
 					 fence, 0);
+    /*DTS2017031303521 ,tianfangzhou twx429349 ,20170328,end*/
+
 	if (IS_ERR(fence->file))
 		goto err;
 

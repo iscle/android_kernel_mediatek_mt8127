@@ -587,7 +587,9 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 #endif
 
 	ASSERT_WDEV_LOCK(wdev);
-
+	/* < DTS2017030106274  wangxuan/wwx427566 20170215 begin */
+	printk(KERN_WARNING "MTKDEBUG intype =%d\n", wdev->iftype);
+	/* DTS2017030106274  wangxuan/wwx427566 20170215 end> */
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION &&
 		    wdev->iftype != NL80211_IFTYPE_P2P_CLIENT)) {
 		cfg80211_put_bss(wdev->wiphy, bss);
@@ -625,6 +627,9 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 #endif
 
 	if (!bss && (status == WLAN_STATUS_SUCCESS)) {
+		/* < DTS2017030106274  wangxuan/wwx427566 20170215 begin */
+		printk(KERN_WARNING "MTKDEBUG BSS NULL in CFG80211\n");
+		/* DTS2017030106274  wangxuan/wwx427566 20170215 end> */
 		WARN_ON_ONCE(!wiphy_to_rdev(wdev->wiphy)->ops->connect);
 		bss = cfg80211_get_bss(wdev->wiphy, NULL, bssid,
 				       wdev->ssid, wdev->ssid_len,

@@ -42,6 +42,17 @@
 #include <linux/gfp.h>
 #include <linux/module.h>
 
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+#include "wifipro_tcp_monitor.h"
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef  CONFIG_HW_WIFI
+#include "wifi_tcp_statistics.h"
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
+
 /* People can turn this off for buggy TCP's found in printers etc. */
 int sysctl_tcp_retrans_collapse __read_mostly = 1;
 
@@ -197,7 +208,7 @@ u32 tcp_default_init_rwnd(u32 mss)
 	 * (RFC 3517, Section 4, NextSeg() rule (2)). Further place a
 	 * limit when mss is larger than 1460.
 	 */
-	u32 init_rwnd = TCP_INIT_CWND * 2;
+	u32 init_rwnd = sysctl_tcp_default_init_rwnd;
 
 	if (mss > 1460)
 		init_rwnd = max((1460 * init_rwnd) / mss, 2U);
@@ -998,6 +1009,11 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	if (after(tcb->end_seq, tp->snd_nxt) || tcb->seq == tcb->end_seq)
 		TCP_ADD_STATS(sock_net(sk), TCP_MIB_OUTSEGS,
 			      tcp_skb_pcount(skb));
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	wifi_IncrSendSegs(sk, tcp_skb_pcount(skb));
+#endif
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
 
 	/* OK, its time to fill skb_shinfo(skb)->gso_segs */
 	skb_shinfo(skb)->gso_segs = tcp_skb_pcount(skb);
@@ -2114,7 +2130,7 @@ bool tcp_schedule_loss_probe(struct sock *sk)
 	}
 
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_LOSS_PROBE, timeout,
-				  TCP_RTO_MAX);
+				  sysctl_tcp_rto_max);
 	return true;
 }
 
@@ -2185,7 +2201,7 @@ void tcp_send_loss_probe(struct sock *sk)
 rearm_timer:
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 				  inet_csk(sk)->icsk_rto,
-				  TCP_RTO_MAX);
+				  sysctl_tcp_rto_max);
 
 	if (likely(!err))
 		NET_INC_STATS_BH(sock_net(sk),
@@ -2713,7 +2729,7 @@ begin_fwd:
 		if (skb == tcp_write_queue_head(sk))
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 						  inet_csk(sk)->icsk_rto,
-						  TCP_RTO_MAX);
+						  sysctl_tcp_rto_max);
 	}
 }
 
@@ -2803,6 +2819,11 @@ void tcp_send_active_reset(struct sock *sk, gfp_t priority)
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPABORTFAILED);
 
 	TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTRSTS);
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	wifi_IncrRstSegs(sk, 1);
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 }
 
 /* Send a crossed SYN-ACK during socket establishment.
@@ -2912,7 +2933,11 @@ struct sk_buff *tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	tcp_options_write((__be32 *)(th + 1), tp, &opts);
 	th->doff = (tcp_header_size >> 2);
 	TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_OUTSEGS);
-
+	/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	wifi_IncrSendSegs(sk, tcp_skb_pcount(skb));
+#endif
+	/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 #ifdef CONFIG_TCP_MD5SIG
 	/* Okay, we have all we need - do the md5 hash if needed */
 	if (md5) {
@@ -3108,6 +3133,11 @@ int tcp_connect(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct sk_buff *buff;
 	int err;
+	/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFIPRO
+	int wifipro_dev_max_len = 0;
+#endif
+	/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 
 	tcp_connect_init(sk);
 
@@ -3140,7 +3170,17 @@ int tcp_connect(struct sock *sk)
 
 	/* Timer for repeating the SYN until an answer. */
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-				  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
+				  inet_csk(sk)->icsk_rto, sysctl_tcp_rto_max);
+	/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFIPRO
+	if (buff->dev) {
+	    wifipro_dev_max_len = strnlen(buff->dev->name, IFNAMSIZ-1);
+	    strncpy(buff->sk->wifipro_dev_name, buff->dev->name, wifipro_dev_max_len);
+	    buff->sk->wifipro_dev_name[wifipro_dev_max_len] = '\0';
+	    WIFIPRO_DEBUG("wifipro_dev_name is %s", buff->dev->name);
+	}
+#endif
+	/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 	return 0;
 }
 EXPORT_SYMBOL(tcp_connect);
@@ -3224,7 +3264,7 @@ void tcp_send_ack(struct sock *sk)
 		inet_csk_schedule_ack(sk);
 		inet_csk(sk)->icsk_ack.ato = TCP_ATO_MIN;
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
-					  TCP_DELACK_MAX, TCP_RTO_MAX);
+					  TCP_DELACK_MAX, sysctl_tcp_rto_max);
 		return;
 	}
 
@@ -3344,7 +3384,7 @@ void tcp_send_probe0(struct sock *sk)
 		if (icsk->icsk_backoff < sysctl_tcp_retries2)
 			icsk->icsk_backoff++;
 		icsk->icsk_probes_out++;
-		probe_max = TCP_RTO_MAX;
+		probe_max = sysctl_tcp_rto_max;
 	} else {
 		/* If packet was not sent due to local congestion,
 		 * do not backoff and do not remember icsk_probes_out.
@@ -3358,7 +3398,7 @@ void tcp_send_probe0(struct sock *sk)
 	}
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_PROBE0,
 				  inet_csk_rto_backoff(icsk, probe_max),
-				  TCP_RTO_MAX);
+				  sysctl_tcp_rto_max);
 }
 
 int tcp_rtx_synack(struct sock *sk, struct request_sock *req)

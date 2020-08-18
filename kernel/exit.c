@@ -53,7 +53,9 @@
 #include <linux/oom.h>
 #include <linux/writeback.h>
 #include <linux/shm.h>
-
+#ifdef CONFIG_MTPROF
+#include "mt_cputime.h"
+#endif
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/pgtable.h>
@@ -295,6 +297,10 @@ kill_orphaned_pgrp(struct task_struct *tsk, struct task_struct *parent)
 {
 	struct pid *pgrp = task_pgrp(tsk);
 	struct task_struct *ignored_task = tsk;
+    /*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,begin*/
+    struct task_struct *pgtask = get_pid_task(pgrp, PIDTYPE_PID);
+    int avoid_zygote = 0;
+    /*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,end*/
 
 	if (!parent)
 		/* exit: our father is in a different pgrp than
@@ -307,13 +313,25 @@ kill_orphaned_pgrp(struct task_struct *tsk, struct task_struct *parent)
 		 */
 		ignored_task = NULL;
 
-	if (task_pgrp(parent) != pgrp &&
+    /*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,begin*/
+    if (pgtask != NULL){
+        if (!strncmp("main", pgtask->group_leader->comm, TASK_COMM_LEN) && uid_eq(task_uid(pgtask->group_leader),GLOBAL_ROOT_UID)){
+            avoid_zygote = 1;
+        }
+        put_task_struct(pgtask);
+    }
+    /*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,end*/
+
+    /*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,begin*/
+    if (!avoid_zygote &&
+	    task_pgrp(parent) != pgrp &&
 	    task_session(parent) == task_session(tsk) &&
 	    will_become_orphaned_pgrp(pgrp, ignored_task) &&
 	    has_stopped_jobs(pgrp)) {
 		__kill_pgrp_info(SIGHUP, SEND_SIG_PRIV, pgrp);
 		__kill_pgrp_info(SIGCONT, SEND_SIG_PRIV, pgrp);
 	}
+	/*DTS2017022305292 ,tianfangzhou/twx429349 ,mtk71029 add to avoid zygote orphaned process group start ,end*/
 }
 
 #ifdef CONFIG_MEMCG
@@ -671,7 +689,12 @@ void do_exit(long code)
 	TASKS_RCU(int tasks_rcu_i);
 
 	profile_task_exit(tsk);
-
+#ifdef CONFIG_MTPROF
+#ifdef CONFIG_MTPROF_CPUTIME
+	/* mt shceduler profiling*/
+	end_mtproc_info(tsk);
+#endif
+#endif
 	WARN_ON(blk_needs_flush_plug(tsk));
 
 	if (unlikely(in_interrupt()))

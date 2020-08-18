@@ -66,6 +66,10 @@
 
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+#include <power/msgnotify.h>
+#endif
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -726,6 +730,9 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	 * will align it up.
 	 */
 	rlim_stack = rlimit(RLIMIT_STACK) & PAGE_MASK;
+
+	stack_expand = rlim_stack;
+
 #ifdef CONFIG_STACK_GROWSUP
 	if (stack_size + stack_expand > rlim_stack)
 		stack_base = vma->vm_start + rlim_stack;
@@ -1050,6 +1057,9 @@ void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 	task_lock(tsk);
 	trace_task_rename(tsk, buf);
 	strlcpy(tsk->comm, buf, sizeof(tsk->comm));
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+	set_main_looper_thread(tsk,buf);
+#endif
 	task_unlock(tsk);
 	perf_event_comm(tsk, exec);
 }

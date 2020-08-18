@@ -361,6 +361,12 @@ struct sock {
 
 	struct sk_filter __rcu	*sk_filter;
 	struct socket_wq __rcu	*sk_wq;
+	/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFIPRO
+	int wifipro_is_google_sock;
+	char wifipro_dev_name[IFNAMSIZ];
+#endif
+	/*DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 
 #ifdef CONFIG_XFRM
 	struct xfrm_policy	*sk_policy[2];

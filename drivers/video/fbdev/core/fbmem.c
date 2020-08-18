@@ -32,10 +32,16 @@
 #include <linux/device.h>
 #include <linux/efi.h>
 #include <linux/fb.h>
-
+/*< DTS2017012601939 xingbin/xwx427571 20170217 begin */
+#include <mt_boot.h>
+/*< DTS2017012601939 xingbin/xwx427571 20170217 end */
 #include <asm/fb.h>
 
-
+/*<DTS2015110304872  machao/mwx306152 20151120 begin */
+#ifdef CONFIG_LOG_JANK
+#include <linux/log_jank.h>
+#endif
+/*<DTS2015110304872  machao/mwx306152 20151120 end */
     /*
      *  Frame buffer device initialization and setup routines
      */
@@ -1051,18 +1057,42 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 	return ret;
 }
 EXPORT_SYMBOL(fb_set_var);
-
+/*< DTS2017012601939 xingbin/xwx427571 20170217 begin */
+extern int lcm_early_suspend(void);
+/*< DTS2017012601939 xingbin/xwx427571 20170217 end */
+/*< DTS2017030108253 xingbin/xwx427571 0302 begin */
+extern int Disp_Ovl_Engine_Check_WFD_Instance(void);
+/*< DTS2017012601939 xingbin/xwx427571 20170217 end */
 int
 fb_blank(struct fb_info *info, int blank)
-{	
+{
 	struct fb_event event;
 	int ret = -EINVAL, early_ret;
 
  	if (blank > FB_BLANK_POWERDOWN)
  		blank = FB_BLANK_POWERDOWN;
+/*<DTS2015110304872  machao/mwx306152 20151120 begin */
+#ifdef CONFIG_LOG_JANK
+    if(blank > 0)
+    {
+        LOG_JANK_V(JLID_HWC_LCD_BLANK_START, "%s", "JL_HWC_LCD_BLANK_START");
+    }
+    else
+    {
+        LOG_JANK_V(JLID_HWC_LCD_UNBLANK_START, "%s", "JL_HWC_LCD_UNBLANK_START");
+    }
+#endif
+/*<DTS2015110304872  machao/mwx306152 20151120 end */
 
 	event.info = info;
 	event.data = &blank;
+
+	/*< DTS2017012601939 xingbin/xwx427571 20170217 begin */
+	/*< DTS2017030108253 xingbin/xwx427571 0302 begin */
+	if((blank==FB_BLANK_POWERDOWN)&&(get_boot_mode() != RECOVERY_BOOT)&&(!Disp_Ovl_Engine_Check_WFD_Instance()))
+		lcm_early_suspend();
+	/*DTS2017030108253 xingbin/xwx427571 0302 end  >*/
+	/*< DTS2017012601939 xingbin/xwx427571 20170217 end */
 
 	early_ret = fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
 
@@ -1079,7 +1109,18 @@ fb_blank(struct fb_info *info, int blank)
 		if (!early_ret)
 			fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK, &event);
 	}
-
+/*<DTS2015110304872  machao/mwx306152 20151120 begin */
+#ifdef CONFIG_LOG_JANK
+    if(blank > 0)
+    {
+        LOG_JANK_V(JLID_HWC_LCD_BLANK_END, "%s", "JL_HWC_LCD_BLANK_END");
+    }
+    else
+    {
+        LOG_JANK_V(JLID_HWC_LCD_UNBLANK_END, "%s", "JL_HWC_LCD_UNBLANK_END");
+    }
+#endif
+/*<DTS2015110304872  machao/mwx306152 20151120 end */
  	return ret;
 }
 EXPORT_SYMBOL(fb_blank);

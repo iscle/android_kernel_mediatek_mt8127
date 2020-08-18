@@ -30,6 +30,9 @@
 #include <linux/tick.h>
 #include <trace/events/power.h>
 
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+#include <power/msgnotify.h>
+#endif
 /**
  * The "cpufreq driver" - the arch- or hardware-dependent low
  * level driver of CPUFreq support, and its spinlock. This lock
@@ -278,9 +281,16 @@ static inline void adjust_jiffies(unsigned long val, struct cpufreq_freqs *ci)
 }
 #endif
 
+void __weak arch_scale_set_curr_freq(int cpu, unsigned long freq) {}
+
+void __weak arch_scale_set_max_freq(int cpu, unsigned long freq) {}
+
 static void __cpufreq_notify_transition(struct cpufreq_policy *policy,
 		struct cpufreq_freqs *freqs, unsigned int state)
 {
+	struct cpumask cpus;
+	int cpu;
+
 	BUG_ON(irqs_disabled());
 
 	if (cpufreq_disabled())
@@ -315,6 +325,11 @@ static void __cpufreq_notify_transition(struct cpufreq_policy *policy,
 		pr_debug("FREQ: %lu - CPU: %lu\n",
 			 (unsigned long)freqs->new, (unsigned long)freqs->cpu);
 		trace_cpu_frequency(freqs->new, freqs->cpu);
+
+		arch_get_cluster_cpus(&cpus, arch_get_cluster_id(freqs->cpu));
+		for_each_cpu(cpu, &cpus)
+			arch_scale_set_curr_freq(cpu, freqs->new);
+
 		srcu_notifier_call_chain(&cpufreq_transition_notifier_list,
 				CPUFREQ_POSTCHANGE, freqs);
 		if (likely(policy) && likely(policy->cpu == freqs->cpu))
@@ -708,6 +723,29 @@ static ssize_t show_scaling_setspeed(struct cpufreq_policy *policy, char *buf)
 	return policy->governor->show_setspeed(policy, buf);
 }
 
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+static ssize_t store_msg_policy(struct cpufreq_policy *policy,
+					const char *buf, size_t count)
+{
+	unsigned int value = 0;
+	unsigned int ret;
+
+	ret = sscanf(buf, "%u", &value);
+	if (ret != 1)
+		return -EINVAL;
+
+	set_msg_threshold(value);
+
+	return count;
+}
+
+static ssize_t show_msg_policy(struct cpufreq_policy *policy, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "threshold:%u,max_msg_percent:%u\n",
+		get_msg_threshold(), get_max_msg_percent());
+}
+#endif
+
 /**
  * show_bios_limit - show the current cpufreq HW/BIOS limitation
  */
@@ -737,6 +775,9 @@ cpufreq_freq_attr_rw(scaling_min_freq);
 cpufreq_freq_attr_rw(scaling_max_freq);
 cpufreq_freq_attr_rw(scaling_governor);
 cpufreq_freq_attr_rw(scaling_setspeed);
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+cpufreq_freq_attr_rw(msg_policy);
+#endif
 
 static struct attribute *default_attrs[] = {
 	&cpuinfo_min_freq.attr,
@@ -750,6 +791,9 @@ static struct attribute *default_attrs[] = {
 	&scaling_driver.attr,
 	&scaling_available_governors.attr,
 	&scaling_setspeed.attr,
+#ifdef CONFIG_HUAWEI_MSG_POLICY
+	&msg_policy.attr,
+#endif
 	NULL
 };
 
@@ -1667,6 +1711,9 @@ void cpufreq_suspend(void)
 {
 	struct cpufreq_policy *policy;
 
+	/* Avoid hotplug racing issue */
+	return;
+
 	if (!cpufreq_driver)
 		return;
 
@@ -1698,6 +1745,9 @@ suspend:
 void cpufreq_resume(void)
 {
 	struct cpufreq_policy *policy;
+
+	/* Avoid hotplug racing issue */
+	return;
 
 	if (!cpufreq_driver)
 		return;
@@ -2168,7 +2218,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 				struct cpufreq_policy *new_policy)
 {
 	struct cpufreq_governor *old_gov;
-	int ret;
+	int ret, cpu;
 
 	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
 		 new_policy->cpu, new_policy->min, new_policy->max);
@@ -2205,6 +2255,9 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
+
+	for_each_cpu(cpu, policy->cpus)
+		arch_scale_set_max_freq(cpu, policy->max);
 
 	pr_debug("new min and max freqs are %u - %u kHz\n",
 		 policy->min, policy->max);

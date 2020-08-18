@@ -26,7 +26,29 @@
 #include "mmc_ops.h"
 #include "sd.h"
 #include "sd_ops.h"
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+#include <linux/mmc/dsm_sdcard.h>
+u32 sd_manfid;
+struct dsm_sdcard_cmd_log dsm_sdcard_cmd_logs[] =
+{
+	{"CMD8 : ",				0},
+	{"CMD55 : ",    		0},
+	{"ACMD41: ",			0},
+	{"CMD2_RESP0 : ",		0},
+	{"CMD2_RESP1 : ",		0},
+	{"CMD2_RESP2 : ",		0},
+	{"CMD2_RESP3 : ",		0},
+	{"CMD3 : ",				0},
+	{"CMD9_RESP0 : ",		0},
+	{"CMD9_RESP1 : ",		0},
+	{"CMD9_RESP2 : ",		0},
+	{"CMD9_RESP3 : ",		0},
+	{"CMD7 : ",				0},
+	{"Report Uevent : ",	0},
+};
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -248,7 +270,9 @@ static int mmc_read_ssr(struct mmc_card *card)
 
 	for (i = 0; i < 16; i++)
 		ssr[i] = be32_to_cpu(ssr[i]);
-
+	/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 begin > */
+	card->ssr.speed_class = UNSTUFF_BITS(ssr, 440 - 384, 8);
+	/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 end > */
 	/*
 	 * UNSTUFF_BITS only works with four u32s so we have to offset the
 	 * bitfield positions accordingly.
@@ -660,15 +684,10 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
 	 * SPI mode doesn't define CMD19 and tuning is only valid for SDR50 and
 	 * SDR104 mode SD-cards. Note that tuning is mandatory for SDR104.
 	 */
-	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning &&
-			(card->sd_bus_speed == UHS_SDR50_BUS_SPEED ||
-			 card->sd_bus_speed == UHS_SDR104_BUS_SPEED)) {
-		mmc_host_clk_hold(card->host);
-		err = card->host->ops->execute_tuning(card->host,
-						      MMC_SEND_TUNING_BLOCK);
-		mmc_host_clk_release(card->host);
-	}
-
+	if (!mmc_host_is_spi(card->host) &&
+	    (card->sd_bus_speed == UHS_SDR50_BUS_SPEED ||
+	     card->sd_bus_speed == UHS_SDR104_BUS_SPEED))
+		err = mmc_execute_tuning(card);
 out:
 	kfree(status);
 
@@ -689,6 +708,12 @@ MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
 MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
+/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 begin > */
+MMC_DEV_ATTR(speed_class, "0x%08x\n", card->ssr.speed_class);
+/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 end > */
+/* < DTS2017010304891 yanwenlong/ywx422246 20170222 begin */
+MMC_DEV_ATTR(state, "0x%08x\n", card->state);
+/* DTS2017010304891 yanwenlong/ywx422246 20170222 end > */
 
 
 static struct attribute *sd_std_attrs[] = {
@@ -704,6 +729,12 @@ static struct attribute *sd_std_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_oemid.attr,
 	&dev_attr_serial.attr,
+	/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 begin > */
+	&dev_attr_speed_class.attr,
+	/* < DTS2017010304891 guoyuanyuan/lwx422270 20170123 end > */
+	/* < DTS2017010304891 yanwenlong/ywx422246 20170222 begin */
+	&dev_attr_state.attr,
+	/* DTS2017010304891 yanwenlong/ywx422246 20170222 end > */
 	NULL,
 };
 ATTRIBUTE_GROUPS(sd_std);
@@ -794,7 +825,12 @@ try_again:
 int mmc_sd_get_csd(struct mmc_host *host, struct mmc_card *card)
 {
 	int err;
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	int buff_len;
+	char *log_buff;
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 	/*
 	 * Fetch CSD from card.
 	 */
@@ -803,9 +839,33 @@ int mmc_sd_get_csd(struct mmc_host *host, struct mmc_card *card)
 		return err;
 
 	err = mmc_decode_csd(card);
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/	
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	if(!strcmp(mmc_hostname(host), "mmc1"))
+	{
+		 dsm_sdcard_cmd_logs[DSM_SDCARD_CMD9_R0].value = card->raw_csd[0];
+		 dsm_sdcard_cmd_logs[DSM_SDCARD_CMD9_R1].value = card->raw_csd[1];
+		 dsm_sdcard_cmd_logs[DSM_SDCARD_CMD9_R2].value = card->raw_csd[2];
+		 dsm_sdcard_cmd_logs[DSM_SDCARD_CMD9_R3].value = card->raw_csd[3];
+	}
+
+	if (err)
+	{
+		if(-ENOMEDIUM != err && -ETIMEDOUT != err
+				&& !strcmp(mmc_hostname(host), "mmc1") && !dsm_client_ocuppy(sdcard_dclient))
+		{
+			log_buff = dsm_sdcard_get_log(DSM_SDCARD_CMD9_R3,err);
+			buff_len = strlen(log_buff);
+			dsm_client_copy(sdcard_dclient,log_buff,buff_len + 1);
+			dsm_client_notify(sdcard_dclient, DSM_SDCARD_CMD9_RESP_ERR);
+		}
+		return err;
+	}
+#else
 	if (err)
 		return err;
-
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 	return 0;
 }
 
@@ -813,6 +873,9 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 	bool reinit)
 {
 	int err;
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	int retries;
+#endif
 
 	if (!reinit) {
 		/*
@@ -839,7 +902,26 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 		/*
 		 * Fetch switch information from card.
 		 */
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+		for (retries = 1; retries <= 3; retries++) {
+			err = mmc_read_switch(card);
+			if (!err) {
+				if (retries > 1) {
+					printk(KERN_WARNING
+					       "%s: recovered\n", 
+					       mmc_hostname(host));
+				}
+				break;
+			} else {
+				printk(KERN_WARNING
+				       "%s: read switch failed (attempt %d)\n",
+				       mmc_hostname(host), retries);
+			}
+		}
+#else
 		err = mmc_read_switch(card);
+#endif
+
 		if (err)
 			return err;
 	}
@@ -906,6 +988,11 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	int err;
 	u32 cid[4];
 	u32 rocr = 0;
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/ 
+#ifdef CONFIG_HUAWEI_DSM
+	int i=0;
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/ 
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
@@ -931,7 +1018,18 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		card->type = MMC_TYPE_SD;
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
 	}
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	sd_manfid = cid[0]>>24;
+	if(!strcmp(mmc_hostname(host), "mmc1"))
+	{
+		for(i=0; i< DSM_SDCARD_CMD_MAX; i++)
+		{
+			dsm_sdcard_cmd_logs[i].manfid = sd_manfid;
+		}
+	}
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 	/*
 	 * For native busses:  get card RCA and quit open drain mode.
 	 */
@@ -1013,6 +1111,14 @@ free_card:
 }
 
 /*
+ * SD card power cycle, if SD use MMC_CAP_HW_RESET, please remove this function
+ */
+int mmc_sd_power_cycle(struct mmc_host *host, u32 ocr, struct mmc_card *card)
+{
+	return mmc_sd_init_card(host, ocr, card);
+}
+
+/*
  * Host is being removed. Free up the current card.
  */
 static void mmc_sd_remove(struct mmc_host *host)
@@ -1037,7 +1143,10 @@ static int mmc_sd_alive(struct mmc_host *host)
  */
 static void mmc_sd_detect(struct mmc_host *host)
 {
-	int err;
+	int err = 0;
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	int retries = 5;
+#endif
 
 	BUG_ON(!host);
 	BUG_ON(!host->card);
@@ -1047,7 +1156,23 @@ static void mmc_sd_detect(struct mmc_host *host)
 	/*
 	 * Just check if our card has been removed.
 	 */
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	while(retries) {
+		err = mmc_send_status(host->card, NULL);
+		if (err) {
+			retries--;
+			udelay(5);
+			continue;
+		}
+		break;
+	}
+	if (!retries) {
+		printk(KERN_ERR "%s(%s): Unable to re-detect card (%d)\n",
+		       __func__, mmc_hostname(host), err);
+	}
+#else
 	err = _mmc_detect_card_removed(host);
+#endif
 
 	mmc_put_card(host->card);
 
@@ -1109,6 +1234,9 @@ static int mmc_sd_suspend(struct mmc_host *host)
 static int _mmc_sd_resume(struct mmc_host *host)
 {
 	int err = 0;
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	int retries;
+#endif
 
 	BUG_ON(!host);
 	BUG_ON(!host->card);
@@ -1119,7 +1247,23 @@ static int _mmc_sd_resume(struct mmc_host *host)
 		goto out;
 
 	mmc_power_up(host, host->card->ocr);
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	retries = 5;
+	while (retries) {
+		err = mmc_sd_init_card(host, host->card->ocr, host->card);
+
+		if (err) {
+			printk(KERN_ERR "%s: Re-init card rc = %d (retries = %d)\n",
+			       mmc_hostname(host), err, retries);
+			mdelay(5);
+			retries--;
+			continue;
+		}
+		break;
+	}
+#else
 	err = mmc_sd_init_card(host, host->card->ocr, host->card);
+#endif
 	mmc_card_clr_suspended(host->card);
 
 out:
@@ -1180,15 +1324,10 @@ static int mmc_sd_runtime_resume(struct mmc_host *host)
 	return 0;
 }
 
-static int mmc_sd_power_restore(struct mmc_host *host)
+static int mmc_sd_reset(struct mmc_host *host)
 {
-	int ret;
-
-	mmc_claim_host(host);
-	ret = mmc_sd_init_card(host, host->card->ocr, host->card);
-	mmc_release_host(host);
-
-	return ret;
+	mmc_power_cycle(host, host->card->ocr);
+	return mmc_sd_init_card(host, host->card->ocr, host->card);
 }
 
 static const struct mmc_bus_ops mmc_sd_ops = {
@@ -1198,9 +1337,9 @@ static const struct mmc_bus_ops mmc_sd_ops = {
 	.runtime_resume = mmc_sd_runtime_resume,
 	.suspend = mmc_sd_suspend,
 	.resume = mmc_sd_resume,
-	.power_restore = mmc_sd_power_restore,
 	.alive = mmc_sd_alive,
 	.shutdown = mmc_sd_suspend,
+	.reset = mmc_sd_reset,
 };
 
 /*
@@ -1210,6 +1349,9 @@ int mmc_attach_sd(struct mmc_host *host)
 {
 	int err;
 	u32 ocr, rocr;
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	int retries;
+#endif
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
@@ -1246,9 +1388,27 @@ int mmc_attach_sd(struct mmc_host *host)
 	/*
 	 * Detect and init the card.
 	 */
+#ifdef CONFIG_MMC_PARANOID_SD_INIT
+	retries = 5;
+	while (retries) {
+		err = mmc_sd_init_card(host, rocr, NULL);
+		if (err) {
+			retries--;
+			continue;
+		}
+		break;
+	}
+
+	if (!retries) {
+		printk(KERN_ERR "%s: mmc_sd_init_card() failure (err = %d)\n",
+		       mmc_hostname(host), err);
+		goto err;
+	}
+#else
 	err = mmc_sd_init_card(host, rocr, NULL);
 	if (err)
 		goto err;
+#endif
 
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);
@@ -1271,4 +1431,38 @@ err:
 
 	return err;
 }
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+char *dsm_sdcard_get_log(int cmd,int err)
+{
+	int i;
+	int ret = 0;
+	int buff_size = sizeof(g_dsm_log_sum);
+	char *dsm_log_buff = g_dsm_log_sum;
+
+	memset(g_dsm_log_sum,0,buff_size);
+
+	ret = snprintf(dsm_log_buff,buff_size,"Err : %d\n",err);
+	dsm_log_buff += ret;
+	buff_size -= ret;
+
+	for(i = 0; i <= cmd; i++)
+	{
+		ret = snprintf(dsm_log_buff,buff_size,
+		"%s%08x\n",dsm_sdcard_cmd_logs[i].log,dsm_sdcard_cmd_logs[i].value);
+		if(ret > buff_size -1)
+		{
+			printk(KERN_ERR "Buff size is not enough\n");
+			printk(KERN_ERR "%s",g_dsm_log_sum);
+			return g_dsm_log_sum;
+		}
+		dsm_log_buff += ret;
+		buff_size -= ret;
+	}
+	pr_debug("DSM_DEBUG %s",g_dsm_log_sum);
+	return g_dsm_log_sum;
+}
+EXPORT_SYMBOL(dsm_sdcard_get_log);
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 

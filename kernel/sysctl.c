@@ -104,6 +104,8 @@ extern char core_pattern[];
 extern unsigned int core_pipe_limit;
 #endif
 extern int pid_max;
+extern int extra_free_kbytes;
+extern int min_free_order_shift;
 extern int pid_max_min, pid_max_max;
 extern int percpu_pagelist_fraction;
 extern int compat_log;
@@ -132,6 +134,12 @@ static int ten_thousand = 10000;
 
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
 static unsigned long dirty_bytes_min = 2 * PAGE_SIZE;
+#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
+ extern int direct_vm_swappiness;
+ #endif
+#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
+static int two_hundred = 200;
+#endif
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -274,6 +282,10 @@ static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
 static int max_extfrag_threshold = 1000;
+#endif
+#ifdef CONFIG_SHRINK_MEMORY
+static int min_shrink_memory = 1;
+static int max_shrink_memory = 100;
 #endif
 
 static struct ctl_table kern_table[] = {
@@ -1223,8 +1235,25 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
-		.extra2		= &one_hundred,
-	},
+#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
+               .extra2         = &two_hundred,
+#else
+                 .extra2         = &one_hundred,
+#endif
+       },
+#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
+       {
+               .procname       = "direct_swappiness",
+               .data           = &direct_vm_swappiness,
+               .maxlen         = sizeof(direct_vm_swappiness),
+               .mode           = 0644,
+               .proc_handler   = proc_dointvec_minmax,
+               .extra1         = &zero,
+               .extra2         = &two_hundred,
+         },
+#endif
+
+
 #ifdef CONFIG_HUGETLB_PAGE
 	{
 		.procname	= "nr_hugepages",
@@ -1299,6 +1328,17 @@ static struct ctl_table vm_table[] = {
 	},
 
 #endif /* CONFIG_COMPACTION */
+#ifdef CONFIG_SHRINK_MEMORY
+       {
+       .procname    = "shrink_memory",
+       .data        = &sysctl_shrink_memory,
+       .maxlen      = sizeof(int),
+       .mode        = 0200,
+       .proc_handler = sysctl_shrinkmem_handler,
+       .extra1      = &min_shrink_memory,
+       .extra2      = &max_shrink_memory,
+       },
+#endif
 	{
 		.procname	= "min_free_kbytes",
 		.data		= &min_free_kbytes,
@@ -1306,6 +1346,21 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= min_free_kbytes_sysctl_handler,
 		.extra1		= &zero,
+	},
+	{
+		.procname	= "extra_free_kbytes",
+		.data		= &extra_free_kbytes,
+		.maxlen		= sizeof(extra_free_kbytes),
+		.mode		= 0644,
+		.proc_handler	= min_free_kbytes_sysctl_handler,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "min_free_order_shift",
+		.data		= &min_free_order_shift,
+		.maxlen		= sizeof(min_free_order_shift),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec
 	},
 	{
 		.procname	= "percpu_pagelist_fraction",
@@ -1483,6 +1538,40 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_doulongvec_minmax,
 	},
+#ifdef CONFIG_ZNDSWAP
+	{
+		.procname	= "dt_swapcache",
+		.data		= &dt_swapcache,
+		.maxlen		= sizeof(dt_swapcache),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "dt_writeback",
+		.data		= &dt_writeback,
+		.maxlen		= sizeof(dt_writeback),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "dt_filecache",
+		.data		= &dt_filecache,
+		.maxlen		= sizeof(dt_filecache),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "dt_watermark",
+		.data		= &dt_watermark,
+		.maxlen		= sizeof(dt_watermark),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+	},
+#endif
 	{ }
 };
 

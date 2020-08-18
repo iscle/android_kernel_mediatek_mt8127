@@ -268,17 +268,32 @@
 #include <linux/crypto.h>
 #include <linux/time.h>
 #include <linux/slab.h>
+#include <linux/uid_stat.h>
 
 #include <net/icmp.h>
 #include <net/inet_common.h>
 #include <net/tcp.h>
 #include <net/xfrm.h>
 #include <net/ip.h>
+#include <net/ip6_route.h>
+#include <net/ipv6.h>
+#include <net/transp_v6.h>
 #include <net/sock.h>
 
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 #include <net/busy_poll.h>
+/* <DTS2016060300901 wangqingluo/wwx343280 20160603 begin */
+#ifdef CONFIG_HW_WIFIPRO
+#include "wifipro_tcp_monitor.h"
+#endif
+/* DTS2016060300901 wangqingluo/wwx343280 20160603 end > */
+
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+#include "wifi_tcp_statistics.h"
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 
 int sysctl_tcp_fin_timeout __read_mostly = TCP_FIN_TIMEOUT;
 
@@ -417,7 +432,12 @@ void tcp_init_sock(struct sock *sk)
 
 	sk->sk_sndbuf = sysctl_tcp_wmem[1];
 	sk->sk_rcvbuf = sysctl_tcp_rmem[1];
-
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+	tp->dack_rcv_nxt = 0;
+	tp->dack_seq_num = 0;
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 	local_bh_disable();
 	sock_update_memcg(sk);
 	sk_sockets_allocated_inc(sk);
@@ -589,6 +609,20 @@ int tcp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 		else
 			answ = tp->write_seq - tp->snd_nxt;
 		break;
+				/* MTK_NET_CHANGES */
+case SIOCKILLSOCK:
+{
+	struct uid_err uid_e;
+
+	if (copy_from_user(&uid_e, (char __user *)arg, sizeof(uid_e)))
+		return -EFAULT;
+	pr_debug("SIOCKILLSOCK uid = %d , err = %d", uid_e.appuid, uid_e.errNum);
+	if (uid_e.errNum == 0)
+		tcp_v4_handle_retrans_time_by_uid(uid_e);
+	else
+		tcp_v4_reset_connections_by_uid(uid_e);
+	return 0;
+}
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -1298,6 +1332,10 @@ out:
 		tcp_push(sk, flags, mss_now, tp->nonagle, size_goal);
 out_nopush:
 	release_sock(sk);
+
+	if (copied + copied_syn)
+		uid_stat_tcp_snd(from_kuid(&init_user_ns, current_uid()),
+				 copied + copied_syn);
 	return copied + copied_syn;
 
 do_fault:
@@ -1569,6 +1607,8 @@ int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 	if (copied > 0) {
 		tcp_recv_skb(sk, seq, &offset);
 		tcp_cleanup_rbuf(sk, copied);
+		uid_stat_tcp_rcv(from_kuid(&init_user_ns, current_uid()),
+				 copied);
 	}
 	return copied;
 }
@@ -1898,6 +1938,10 @@ skip_copy:
 	tcp_cleanup_rbuf(sk, copied);
 
 	release_sock(sk);
+
+	if (copied > 0)
+		uid_stat_tcp_rcv(from_kuid(&init_user_ns, current_uid()),
+				 copied);
 	return copied;
 
 out:
@@ -1906,6 +1950,9 @@ out:
 
 recv_urg:
 	err = tcp_recv_urg(sk, msg, len, flags);
+	if (err > 0)
+		uid_stat_tcp_rcv(from_kuid(&init_user_ns, current_uid()),
+				 err);
 	goto out;
 
 recv_sndq:
@@ -1917,6 +1964,17 @@ EXPORT_SYMBOL(tcp_recvmsg);
 void tcp_set_state(struct sock *sk, int state)
 {
 	int oldstate = sk->sk_state;
+	/* < DTS2016061000314 wangqingluo/wwx343280 20160610 begin */
+#ifdef CONFIG_HW_WIFIPRO
+    struct inet_sock *inet_temp = inet_sk(sk);
+    unsigned int dest_addr = 0;
+    unsigned int dest_port = 0;
+    if( NULL != inet_temp){
+        dest_addr = htonl( inet_temp->inet_daddr );
+        dest_port = htons( inet_temp->inet_dport );
+    }
+#endif
+    /* DTS2016061000314 wangqingluo/wwx343280 20160610 end > */
 
 	switch (state) {
 	case TCP_ESTABLISHED:
@@ -1927,7 +1985,12 @@ void tcp_set_state(struct sock *sk, int state)
 	case TCP_CLOSE:
 		if (oldstate == TCP_CLOSE_WAIT || oldstate == TCP_ESTABLISHED)
 			TCP_INC_STATS(sock_net(sk), TCP_MIB_ESTABRESETS);
-
+/* < DTS2016062810925 wangqingluo/wwx343280 20160628 begin */
+#ifdef CONFIG_HW_WIFI
+		if ( oldstate == TCP_ESTABLISHED)
+			wifi_IncrEstabliseRstSegs(sk, 1);
+#endif
+/* DTS2016062810925 wangqingluo/wwx343280 20160628 end > */
 		sk->sk_prot->unhash(sk);
 		if (inet_csk(sk)->icsk_bind_hash &&
 		    !(sk->sk_userlocks & SOCK_BINDPORT_LOCK))
@@ -1942,6 +2005,19 @@ void tcp_set_state(struct sock *sk, int state)
 	 * socket sitting in hash tables.
 	 */
 	sk->sk_state = state;
+
+	/* < DTS2016061000314 wangqingluo/wwx343280 20160610 begin */
+#ifdef CONFIG_HW_WIFIPRO
+    if(state == TCP_SYN_SENT){
+        if(is_wifipro_on && is_mcc_china && wifipro_is_not_local_or_lan_sock(dest_addr)){
+            if(wifipro_is_google_sock(current, dest_addr)){
+                sk->wifipro_is_google_sock = 1;
+                WIFIPRO_DEBUG("add a google sock:%s", wifipro_ntoa(dest_addr));
+            }
+        }
+    }
+#endif
+    /* DTS2016061000314 wangqingluo/wwx343280 20160610 end > */
 
 #ifdef STATE_TRACE
 	SOCK_DEBUG(sk, "TCP sk=%p, State %s -> %s\n", sk, statename[oldstate], statename[state]);
@@ -2536,7 +2612,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		/* Translate value in seconds to number of retransmits */
 		icsk->icsk_accept_queue.rskq_defer_accept =
 			secs_to_retrans(val, TCP_TIMEOUT_INIT / HZ,
-					TCP_RTO_MAX / HZ);
+					sysctl_tcp_rto_max / HZ);
 		break;
 
 	case TCP_WINDOW_CLAMP:
@@ -2759,7 +2835,7 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		break;
 	case TCP_DEFER_ACCEPT:
 		val = retrans_to_secs(icsk->icsk_accept_queue.rskq_defer_accept,
-				      TCP_TIMEOUT_INIT / HZ, TCP_RTO_MAX / HZ);
+				      TCP_TIMEOUT_INIT / HZ, sysctl_tcp_rto_max / HZ);
 		break;
 	case TCP_WINDOW_CLAMP:
 		val = tp->window_clamp;
@@ -3127,4 +3203,122 @@ void __init tcp_init(void)
 	tcp_metrics_init();
 	BUG_ON(tcp_register_congestion_control(&tcp_reno) != 0);
 	tcp_tasklet_init();
+}
+
+static int tcp_is_local(struct net *net, __be32 addr) {
+	struct rtable *rt;
+	struct flowi4 fl4 = { .daddr = addr };
+	rt = ip_route_output_key(net, &fl4);
+	if (IS_ERR_OR_NULL(rt))
+		return 0;
+	return rt->dst.dev && (rt->dst.dev->flags & IFF_LOOPBACK);
+}
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+static int tcp_is_local6(struct net *net, struct in6_addr *addr) {
+	struct rt6_info *rt6 = rt6_lookup(net, addr, addr, 0, 0);
+	return rt6 && rt6->dst.dev && (rt6->dst.dev->flags & IFF_LOOPBACK);
+}
+#endif
+
+/*
+ * tcp_nuke_addr - destroy all sockets on the given local address
+ * if local address is the unspecified address (0.0.0.0 or ::), destroy all
+ * sockets with local addresses that are not configured.
+ */
+int tcp_nuke_addr(struct net *net, struct sockaddr *addr)
+{
+	int family = addr->sa_family;
+	unsigned int bucket;
+
+	struct in_addr *in = NULL;
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	struct in6_addr *in6 = NULL;
+#endif
+	if (family == AF_INET) {
+		in = &((struct sockaddr_in *)addr)->sin_addr;
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	} else if (family == AF_INET6) {
+		in6 = &((struct sockaddr_in6 *)addr)->sin6_addr;
+#endif
+	} else {
+		return -EAFNOSUPPORT;
+	}
+
+	for (bucket = 0; bucket <= tcp_hashinfo.ehash_mask; bucket++) {
+		struct hlist_nulls_node *node;
+		struct sock *sk;
+		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
+
+restart:
+		spin_lock_bh(lock);
+		sk_nulls_for_each(sk, node, &tcp_hashinfo.ehash[bucket].chain) {
+			struct inet_sock *inet = inet_sk(sk);
+
+			if (sk->sk_state == TCP_TIME_WAIT) {
+				/*
+				 * Sockets that are in TIME_WAIT state are
+				 * instances of lightweight inet_timewait_sock,
+				 * we should simply skip them (or we'll try to
+				 * access non-existing fields and crash).
+				 */
+				continue;
+			}
+
+			if (sysctl_ip_dynaddr && sk->sk_state == TCP_SYN_SENT)
+				continue;
+
+			if (sk->sk_state == TCP_TIME_WAIT)
+				continue;
+
+			if (sock_flag(sk, SOCK_DEAD))
+				continue;
+
+			if (family == AF_INET) {
+				__be32 s4 = inet->inet_rcv_saddr;
+				if (s4 == LOOPBACK4_IPV6)
+					continue;
+
+				if (in->s_addr != s4 &&
+				    !(in->s_addr == INADDR_ANY &&
+				      !tcp_is_local(net, s4)))
+					continue;
+			}
+
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+			if (family == AF_INET6) {
+				struct in6_addr *s6;
+				/*add patch for fix wfd disconnect,when UE send MMS*/
+				if (!inet->pinet6)
+						continue;
+				s6 = &sk->sk_v6_rcv_saddr;
+				if (ipv6_addr_type(s6) == IPV6_ADDR_MAPPED)
+					continue;
+
+				if (!ipv6_addr_equal(in6, s6) &&
+				    !(ipv6_addr_equal(in6, &in6addr_any) &&
+				      !tcp_is_local6(net, s6)))
+				continue;
+			}
+#endif
+
+			sock_hold(sk);
+			spin_unlock_bh(lock);
+
+			local_bh_disable();
+			bh_lock_sock(sk);
+			sk->sk_err = ETIMEDOUT;
+			sk->sk_error_report(sk);
+
+			tcp_done(sk);
+			bh_unlock_sock(sk);
+			local_bh_enable();
+			sock_put(sk);
+
+			goto restart;
+		}
+		spin_unlock_bh(lock);
+	}
+
+	return 0;
 }

@@ -31,7 +31,11 @@
 #include <linux/mmc/slot-gpio.h>
 
 #include "sdhci.h"
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+#include <linux/mmc/dsm_emmc.h>
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 #define DRIVER_NAME "sdhci"
 
 #define DBG(f, x...) \
@@ -2041,7 +2045,14 @@ out:
 	sdhci_writel(host, host->ier, SDHCI_SIGNAL_ENABLE);
 	spin_unlock_irqrestore(&host->lock, flags);
 	sdhci_runtime_pm_put(host);
-
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+	if(err && !strcmp(mmc_hostname(mmc), "mmc0")){
+		DSM_EMMC_LOG(mmc->card, DSM_EMMC_TUNING_ERROR,
+			"%s:eMMC tuning error: %d\n", __FUNCTION__, err);
+	}
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 	return err;
 }
 
@@ -2194,6 +2205,16 @@ static void sdhci_timeout_timer(unsigned long data)
 	spin_lock_irqsave(&host->lock, flags);
 
 	if (host->mrq) {
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 begin >*/
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+			if(host->mmc != NULL && host->mmc->card != NULL){
+				if(mmc_card_mmc(host->mmc->card)){
+					DSM_EMMC_LOG(host->mmc->card, DSM_EMMC_HOST_TIMEOUT_ERR,
+						"%s:eMMC HOST Timeout waiting for hardware interrupt.\n", __FUNCTION__);
+				}
+			}
+#endif
+/*DTS2016120701717 guoyuanyuan/gwx422270 20161205 end >*/
 		pr_err("%s: Timeout waiting for hardware "
 			"interrupt.\n", mmc_hostname(host->mmc));
 		sdhci_dumpregs(host);
